@@ -123,6 +123,32 @@ class Server:
                     print("msg: " + str(sender) + " to non-existent user " + user)
                 else:
                     self.send_msg_to_user(user, sender, msg_to_send)
+
+    def send_packet(self, msg):
+        chunks = []
+        for i in range(0, len(msg), util.CHUNK_SIZE):
+            chunks.append(msg[i:min(i+util.CHUNK_SIZE, len(msg))])
+        pkts = []
+        for idx, chunk in enumerate(chunks):
+            if idx == 0:
+                pkts.append(util.make_packet(msg_type="start", msg=chunk))
+            elif idx == len(chunks) - 1:
+                pkts.append(util.make_packet(msg_type="end", msg=chunk))
+            else:
+                pkts.append(util.make_packet(msg_type="data", msg=chunk))
+        if len(pkts) == 1:
+            pkts.append(util.make_packet(msg_type="end", msg=""))
+        return chunks
+
+    def recv_packet(self):
+        total_msg = ""
+        random_number = random.randint(1, 100)
+        while True:
+            data, client_address = self.sock.recvfrom(1024)
+            decoded_msg = data.decode('utf-8')
+            msg_type, seq_no, data, checksum = util.parse_packet(decoded_msg)
+            if util.validate_checksum(decoded_msg):
+                pass
     
     def send_msg_to_user(self, user, sender, msg_to_send):
         address, port = self.usernames[user]

@@ -82,7 +82,7 @@ class Client:
         join_msg = util.make_message("join", 1, self.username)
         pack = util.make_packet(msg=join_msg)
         self.sock.sendto(pack.encode('utf-8'), (self.server_addr, self.server_port))
-    
+
     def receive_handler(self):
         '''
         Waits for a message from server and process it accordingly
@@ -125,6 +125,31 @@ class Client:
                     self.logger.debug('[RECV_MSG]: Unknown message sent')
         except:
               self.logger.debug("[SERVER]: Timeout reached. Moving on.")
+    def send_packet(self, msg):
+        chunks = []
+        for i in range(0, len(msg), util.CHUNK_SIZE):
+            chunks.append(msg[i:min(i+util.CHUNK_SIZE, len(msg))])
+        pkts = []
+        for idx, chunk in enumerate(chunks):
+            if idx == 0:
+                pkts.append(util.make_packet(msg_type="start", msg=chunk))
+            elif idx == len(chunks) - 1:
+                pkts.append(util.make_packet(msg_type="end", msg=chunk))
+            else:
+                pkts.append(util.make_packet(msg_type="data", msg=chunk))
+        if len(pkts) == 1:
+            pkts.append(util.make_packet(msg_type="end", msg=""))
+        return chunks
+
+    def recv_packet(self):
+        total_msg = ""
+        random_number = random.randint(1, 100)
+        while True:
+            data, client_address = self.sock.recvfrom(1024)
+            decoded_msg = data.decode('utf-8')
+            msg_type, seq_no, data, checksum = util.parse_packet(decoded_msg)
+            if util.validate_checksum(decoded_msg):
+                pass
 
     def exit_client(self):
         disconnect_msg = util.make_message("disconnect", 1, self.username)
