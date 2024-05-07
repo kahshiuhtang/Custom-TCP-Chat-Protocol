@@ -41,9 +41,7 @@ class Client:
         Use make_message() and make_util() functions from util.py to make your first join packet
         Waits for userinput and then process it
         '''
-        join_msg = util.make_message("join", 1, self.username)
-        pack = util.make_packet(msg=join_msg)
-        self.sock.sendto(pack.encode('utf-8'), (self.server_addr, self.server_port))
+        self.send_join()
         while True:
             message = input("")
             if message.lower() == 'quit':
@@ -55,11 +53,7 @@ class Client:
 
             if cmd == "msg":
                 self.logger.debug('[INPUT_MSG]: Msg')
-                msg_content = input_words[1] + " "
-                for entry_count in range(0, int(input_words[1])):
-                    msg_content += input_words[2 + entry_count] + " "
-                actual_msg = " ".join(input_words[int(input_words[1]) + 2:])
-                msg_content = msg_content + actual_msg
+                msg_content = self.generate_msg_string(input_words=input_words)
                 send_msg = util.make_message("send_message", 4, msg_content)
                 pack = util.make_packet(msg=send_msg)
                 self.sock.sendto(pack.encode('utf-8'), (self.server_addr, self.server_port))
@@ -75,7 +69,19 @@ class Client:
                 self.logger.debug('[INPUT_MSG]: Unknown message')
                 print("incorrect userinput format")
                 pass
-            
+
+    def generate_msg_string(self, input_words):
+        msg_content = input_words[1] + " "
+        for entry_count in range(0, int(input_words[1])):
+            msg_content += input_words[2 + entry_count] + " "
+        actual_msg = " ".join(input_words[int(input_words[1]) + 2:])
+        msg_content = msg_content + actual_msg
+        return msg_content
+    
+    def send_join(self):      
+        join_msg = util.make_message("join", 1, self.username)
+        pack = util.make_packet(msg=join_msg)
+        self.sock.sendto(pack.encode('utf-8'), (self.server_addr, self.server_port))
 
     def receive_handler(self):
         '''
