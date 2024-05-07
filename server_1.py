@@ -70,13 +70,7 @@ class Server:
                         print("join: " + str(name))
                 elif msg[0] == "request_users_list":
                     self.logger.debug('[MSG]: Request Users List')
-                    num_users = len(self.usernames)
-                    user_string =  ""
-                    for name in sorted(self.usernames.keys()):
-                        user_string += name + " "
-                    if user_string != "":
-                        user_string = user_string[:len(user_string) - 1]
-                    user_string = str(num_users) + " " + user_string
+                    user_string = self.generate_users()
                     users_msg = util.make_message(msg_type="response_users_list", msg_format=3, message=user_string)
                     pkt = util.make_packet(msg=users_msg)
                     self.logger.debug(pkt)
@@ -84,35 +78,7 @@ class Server:
                     username = self.get_username(client_address=client_address)
                     print("request_users_list: " + str(username))
                 elif msg[0] == "send_message":
-                    self.logger.debug('[MSG]: Send Message')
-                    num_recipients = int(msg[2])
-                    recipients = msg[3: 3 + num_recipients]
-                    sent_to = set()
-                    msg_to_send = " ".join(msg[3 + num_recipients :])
-                    self.logger.debug('[Server]: Msg To Send')
-                    self.logger.debug(msg_to_send)
-                    self.logger.debug('[Server]: Recipients')
-                    self.logger.debug(recipients)
-                    sender = self.get_username(client_address=client_address)
-                    print("msg: " + str(sender))
-                    for idx in range(0, num_recipients):
-                        user = recipients[idx]
-                        if user in sent_to:
-                            self.logger.debug('[Server]: Duplicate address specified, ' + str(user))
-                            pass
-                        else:
-                            sent_to.add(user)
-                            if user not in self.usernames.keys():
-                                print("msg: " + str(sender) + " to non-existent user " + user)
-                            else:
-                                address, port = self.usernames[user]
-                                msg_content = "1 " + sender + " " + msg_to_send
-                                send_msg_user = util.make_message(msg_type="forward_message", msg_format=4, message=msg_content)
-                                pkt = util.make_packet(msg=send_msg_user)
-                                self.logger.debug(pkt)
-                                self.logger.debug(address)
-                                self.logger.debug(port)
-                                self.sock.sendto(pkt.encode('utf-8'), (address, port))
+                    self.send_all_msgs(msg, client_address)
                 elif msg[0] == "disconnect":
                     self.logger.debug('[MSG]: Disconnect')
                     if len(msg) < 3:
@@ -132,6 +98,50 @@ class Server:
             self.logger.debug("[SERVER]: Ending server due to exception.")
             self.logger.debug(e)
             self.sock.close()
+
+    def send_all_msgs(self, msg, client_address):
+        self.logger.debug('[MSG]: Send Message')
+        num_recipients = int(msg[2])
+        recipients = msg[3: 3 + num_recipients]
+        sent_to = set()
+        msg_to_send = " ".join(msg[3 + num_recipients :])
+        self.logger.debug('[Server]: Msg To Send')
+        self.logger.debug(msg_to_send)
+        self.logger.debug('[Server]: Recipients')
+        self.logger.debug(recipients)
+        sender = self.get_username(client_address=client_address)
+        print("msg: " + str(sender))
+        for idx in range(0, num_recipients):
+            user = recipients[idx]
+            if user in sent_to:
+                self.logger.debug('[Server]: Duplicate address specified, ' + str(user))
+                pass
+            else:
+                sent_to.add(user)
+                if user not in self.usernames.keys():
+                    print("msg: " + str(sender) + " to non-existent user " + user)
+                else:
+                    self.send_msg_to_user(user, sender, msg_to_send)
+    
+    def send_msg_to_user(self, user, sender, msg_to_send):
+        address, port = self.usernames[user]
+        msg_content = "1 " + sender + " " + msg_to_send
+        send_msg_user = util.make_message(msg_type="forward_message", msg_format=4, message=msg_content)
+        pkt = util.make_packet(msg=send_msg_user)
+        self.logger.debug(pkt)
+        self.logger.debug(address)
+        self.logger.debug(port)
+        self.sock.sendto(pkt.encode('utf-8'), (address, port))
+
+    def generate_users(self):
+        num_users = len(self.usernames)
+        user_string =  ""
+        for name in sorted(self.usernames.keys()):
+            user_string += name + " "
+        if user_string != "":
+            user_string = user_string[:len(user_string) - 1]
+        user_string = str(num_users) + " " + user_string
+        return user_string
 
     def handle_disconnect(self, name):
         self.logger.debug("[SERVER]: Handling disconnect for user " + name)
