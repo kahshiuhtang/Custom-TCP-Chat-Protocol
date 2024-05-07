@@ -7,8 +7,7 @@ import socket
 import util
 import logging
 import threading
-import time
-import random
+import queue
 
 
 class Server:
@@ -25,6 +24,9 @@ class Server:
         self.usernames = dict()
         self.window = window
         self.logger = logging.getLogger(__name__)
+        self.recv_msgs = dict() # seq_no, used to keep track of packets until end packet recieved
+        self.sent_msgs = dict() # used to keep track of sent packets, in case need to resend
+        self.queue = queue.Queue()
         logging.basicConfig(filename='./logs/server.log', encoding='utf-8', level=logging.DEBUG)
 
     def start(self):
@@ -34,12 +36,14 @@ class Server:
 
         '''
         self.logger.debug('Starting Server')
+        T = threading.Thread(target=self.recv_packet)
+        T.daemon = True
+        T.start()
         try:
             while True:
                 self.logger.debug('[SERVER]: Waiting for new packet')
-                data, client_address = self.sock.recvfrom(1024)
-                decoded_data = data.decode('utf-8')
-                segments = decoded_data.split("|")
+                data, client_address = self.queue.get()
+                segments = data.split("|")
                 self.logger.debug('[SERVER]: Recieved packet:')
                 self.logger.debug(segments)
                 self.logger.debug("FROM: ")
@@ -141,15 +145,26 @@ class Server:
         return chunks
 
     def recv_packet(self):
-        total_msg = ""
-        random_number = random.randint(1, 100)
         while True:
-            data, client_address = self.sock.recvfrom(1024)
+            # Maybe use client address instead of seq_no'ss
+            data, client_address = self.sock.recvfrom(2048)
             decoded_msg = data.decode('utf-8')
             msg_type, seq_no, data, checksum = util.parse_packet(decoded_msg)
+            seq_no = int(seq_no)
             if util.validate_checksum(decoded_msg):
-                pass
-    
+                if msg_type == "start":
+                    self.recv_msgs.update({seq_no : data})
+                elif msg_type == "data":
+                    current_msg = self.recv_msgs[seq_no - 1]
+                    del self.recv_msgs[seq_no - 1]
+                    self.recv_msgs.update({seq_no : str(current_msg) + str(data)})
+                elif msg_type == "end":
+                    current_msg = self.recv_msgs[seq_no - 1]
+                    del self.recv_msgs[seq_no - 1]
+                    self.recv_msgs.update({seq_no : str(current_msg) + str(data)})
+                    self.queue.put((str(current_msg) + str(data), client_address))
+                    self.logger.debug("[SERVER]: Completed message, " + str(current_msg) + str(data))
+
     def send_msg_to_user(self, user, sender, msg_to_send):
         address, port = self.usernames[user]
         msg_content = "1 " + sender + " " + msg_to_send
