@@ -14,6 +14,7 @@ class Server:
     '''
     This is the main Server Class. You will  write Server code inside this class.
     '''
+
     def __init__(self, dest, port, window):
         self.server_addr = dest
         self.server_port = port
@@ -24,10 +25,12 @@ class Server:
         self.usernames = dict()
         self.window = window
         self.logger = logging.getLogger(__name__)
-        self.recv_msgs = dict() # seq_no, used to keep track of packets until end packet recieved
-        self.sent_msgs = dict() # used to keep track of sent packets, in case need to resend
+        # seq_no, used to keep track of packets until end packet recieved
+        self.recv_msgs = dict()
+        self.sent_msgs = dict()  # used to keep track of sent packets, in case need to resend
         self.queue = queue.Queue()
-        logging.basicConfig(filename='./logs/server.log', encoding='utf-8', level=logging.DEBUG)
+        logging.basicConfig(filename='./logs/server.log',
+                            encoding='utf-8', level=logging.DEBUG)
 
     def start(self):
         '''
@@ -43,7 +46,7 @@ class Server:
             while True:
                 self.logger.debug('[SERVER]: Waiting for new packet')
                 data, client_address = self.queue.get()
-                segments = data.split("|")
+                segments = data.split()
                 self.logger.debug('[SERVER]: Recieved packet:')
                 self.logger.debug(segments)
                 self.logger.debug("FROM: ")
@@ -51,35 +54,43 @@ class Server:
                 if len(segments) < 3:
                     self.logger.debug('[ERROR]: Wrong sized packet')
                     continue
-                msg = segments[2].split()
+                msg = segments
                 if msg[0] == "join":
                     self.logger.debug('[MSG]: Join')
                     if len(msg) < 3:
-                        self.logger.debug('[ERROR]: Join messsage has less than 3 items')
+                        self.logger.debug(
+                            '[ERROR]: Join messsage has less than 3 items')
                         continue
                     name = msg[2]
                     if len(self.usernames) == util.MAX_NUM_CLIENTS:
                         self.logger.debug('[SERVER]: Max clients hit in JOIN')
-                        full_serv_msg = util.make_message(msg_type="err_server_full", msg_format=2)
+                        full_serv_msg = util.make_message(
+                            msg_type="err_server_full", msg_format=2)
                         pkt = util.make_packet(msg=full_serv_msg)
-                        self.sock.sendto(pkt.encode('utf-8'), (client_address[0], client_address[1]))
+                        self.sock.sendto(pkt.encode('utf-8'),
+                                         (client_address[0], client_address[1]))
                         continue
                     if name in self.usernames.keys():
                         self.logger.debug('[SERVER]: Name found in usernames')
-                        used_msg = util.make_message(msg_type="err_username_unavailable", msg_format=2)
+                        used_msg = util.make_message(
+                            msg_type="err_username_unavailable", msg_format=2)
                         pkt = util.make_packet(msg=used_msg)
-                        self.sock.sendto(pkt.encode('utf-8'), (client_address[0], client_address[1]))
+                        self.sock.sendto(pkt.encode('utf-8'),
+                                         (client_address[0], client_address[1]))
                     else:
-                        self.logger.debug('Adding this username to list of usernames')
+                        self.logger.debug(
+                            'Adding this username to list of usernames')
                         self.usernames.update({name: client_address})
                         print("join: " + str(name))
                 elif msg[0] == "request_users_list":
                     self.logger.debug('[MSG]: Request Users List')
                     user_string = self.generate_users()
-                    users_msg = util.make_message(msg_type="response_users_list", msg_format=3, message=user_string)
+                    users_msg = util.make_message(
+                        msg_type="response_users_list", msg_format=3, message=user_string)
                     pkt = util.make_packet(msg=users_msg)
                     self.logger.debug(pkt)
-                    self.sock.sendto(pkt.encode('utf-8'), (client_address[0], client_address[1]))
+                    self.sock.sendto(pkt.encode('utf-8'),
+                                     (client_address[0], client_address[1]))
                     username = self.get_username(client_address=client_address)
                     print("request_users_list: " + str(username))
                 elif msg[0] == "send_message":
@@ -87,18 +98,21 @@ class Server:
                 elif msg[0] == "disconnect":
                     self.logger.debug('[MSG]: Disconnect')
                     if len(msg) < 3:
-                        self.logger.debug('[ERROR]: Invalid message content for disconnect')
+                        self.logger.debug(
+                            '[ERROR]: Invalid message content for disconnect')
                         continue
                     name = msg[2]
                     self.handle_disconnect(name)
                 else:
                     self.logger.debug('[MSG]: Unknown Message')
-                    used_msg = util.make_message(msg_type="err_unknown_message", msg_format=2)
+                    used_msg = util.make_message(
+                        msg_type="err_unknown_message", msg_format=2)
                     pkt = util.make_packet(msg=used_msg)
-                    self.sock.sendto(pkt.encode('utf-8'), (client_address[0], client_address[1]))
+                    self.sock.sendto(pkt.encode('utf-8'),
+                                     (client_address[0], client_address[1]))
                     username = self.get_username(client_address=client_address)
                     self.handle_disconnect(username)
-                    print("disconnected: " + username+ " sent unknown command")
+                    print("disconnected: " + username + " sent unknown command")
         except Exception as e:
             self.logger.debug("[SERVER]: Ending server due to exception.")
             self.logger.debug(e)
@@ -109,7 +123,7 @@ class Server:
         num_recipients = int(msg[2])
         recipients = msg[3: 3 + num_recipients]
         sent_to = set()
-        msg_to_send = " ".join(msg[3 + num_recipients :])
+        msg_to_send = " ".join(msg[3 + num_recipients:])
         self.logger.debug('[Server]: Msg To Send')
         self.logger.debug(msg_to_send)
         self.logger.debug('[Server]: Recipients')
@@ -119,12 +133,14 @@ class Server:
         for idx in range(0, num_recipients):
             user = recipients[idx]
             if user in sent_to:
-                self.logger.debug('[Server]: Duplicate address specified, ' + str(user))
+                self.logger.debug(
+                    '[Server]: Duplicate address specified, ' + str(user))
                 pass
             else:
                 sent_to.add(user)
                 if user not in self.usernames.keys():
-                    print("msg: " + str(sender) + " to non-existent user " + user)
+                    print("msg: " + str(sender) +
+                          " to non-existent user " + user)
                 else:
                     self.send_msg_to_user(user, sender, msg_to_send)
 
@@ -150,25 +166,31 @@ class Server:
             data, client_address = self.sock.recvfrom(2048)
             decoded_msg = data.decode('utf-8')
             msg_type, seq_no, data, checksum = util.parse_packet(decoded_msg)
+            # print(seq_no)
             seq_no = int(seq_no)
             if util.validate_checksum(decoded_msg):
                 if msg_type == "start":
-                    self.recv_msgs.update({seq_no : data})
+                    self.recv_msgs.update({seq_no: data})
                 elif msg_type == "data":
                     current_msg = self.recv_msgs[seq_no - 1]
                     del self.recv_msgs[seq_no - 1]
-                    self.recv_msgs.update({seq_no : str(current_msg) + str(data)})
+                    self.recv_msgs.update(
+                        {seq_no: str(current_msg) + str(data)})
                 elif msg_type == "end":
                     current_msg = self.recv_msgs[seq_no - 1]
                     del self.recv_msgs[seq_no - 1]
-                    self.recv_msgs.update({seq_no : str(current_msg) + str(data)})
-                    self.queue.put((str(current_msg) + str(data), client_address))
-                    self.logger.debug("[SERVER]: Completed message, " + str(current_msg) + str(data))
+                    self.recv_msgs.update(
+                        {seq_no: str(current_msg) + str(data)})
+                    self.queue.put(
+                        (str(current_msg) + str(data), client_address))
+                    self.logger.debug(
+                        "[SERVER]: Completed message, " + str(current_msg) + str(data))
 
     def send_msg_to_user(self, user, sender, msg_to_send):
         address, port = self.usernames[user]
         msg_content = "1 " + sender + " " + msg_to_send
-        send_msg_user = util.make_message(msg_type="forward_message", msg_format=4, message=msg_content)
+        send_msg_user = util.make_message(
+            msg_type="forward_message", msg_format=4, message=msg_content)
         pkt = util.make_packet(msg=send_msg_user)
         self.logger.debug(pkt)
         self.logger.debug(address)
@@ -177,7 +199,7 @@ class Server:
 
     def generate_users(self):
         num_users = len(self.usernames)
-        user_string =  ""
+        user_string = ""
         for name in sorted(self.usernames.keys()):
             user_string += name + " "
         if user_string != "":
@@ -190,7 +212,8 @@ class Server:
         if name in self.usernames.keys():
             del self.usernames[name]
         else:
-            self.logger.debug("[SERVER]: Error, unable to disconnect this user")
+            self.logger.debug(
+                "[SERVER]: Error, unable to disconnect this user")
         print("disconnected: " + str(name))
 
     def get_username(self, client_address):
@@ -201,6 +224,7 @@ class Server:
         return ""
 
 # Do not change below part of code
+
 
 if __name__ == "__main__":
     def helper():
@@ -215,7 +239,7 @@ if __name__ == "__main__":
 
     try:
         OPTS, ARGS = getopt.getopt(sys.argv[1:],
-                                   "p:a:w", ["port=", "address=","window="])
+                                   "p:a:w", ["port=", "address=", "window="])
     except getopt.GetoptError:
         helper()
         exit()
@@ -232,7 +256,7 @@ if __name__ == "__main__":
         elif o in ("-w", "--window="):
             WINDOW = a
 
-    SERVER = Server(DEST, PORT,WINDOW)
+    SERVER = Server(DEST, PORT, WINDOW)
     try:
         SERVER.start()
     except (KeyboardInterrupt, SystemExit):

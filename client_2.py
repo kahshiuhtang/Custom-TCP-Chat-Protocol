@@ -20,10 +20,12 @@ receive_handler() function is running another thread and you have to listen
 for incoming messages in this function.
 '''
 
+
 class Client:
     '''
     This is the main Client Class. 
     '''
+
     def __init__(self, username, dest, port, window_size):
         self.server_addr = dest
         self.server_port = port
@@ -33,7 +35,8 @@ class Client:
         self.username = username
         self.window_size = window_size
         self.logger = logging.getLogger(__name__)
-        logging.basicConfig(filename='./logs/client_' + str(username) +'.log', encoding='utf-8', level=logging.DEBUG)
+        logging.basicConfig(filename='./logs/client_' + str(username) +
+                            '.log', encoding='utf-8', level=logging.DEBUG)
 
     def start(self):
         '''
@@ -76,8 +79,8 @@ class Client:
         actual_msg = " ".join(input_words[int(input_words[1]) + 2:])
         msg_content = msg_content + actual_msg
         return msg_content
-    
-    def send_join(self):      
+
+    def send_join(self):
         join_msg = util.make_message("join", 1, self.username)
         self.send_packet(msg=join_msg)
 
@@ -103,7 +106,7 @@ class Client:
                     sent_message_whole = segments[2].split()
                     sender = sent_message_whole[3]
                     comb_msg = " ".join(sent_message_whole[4:])
-                    print("msg: " + sender +": " + comb_msg)
+                    print("msg: " + sender + ": " + comb_msg)
                 elif msg[0] == "err_unknown_message":
                     self.logger.debug('[RECV_MSG]: err_unknown_message')
                     print("disconnected: server received an unknown command")
@@ -122,7 +125,7 @@ class Client:
                 else:
                     self.logger.debug('[RECV_MSG]: Unknown message sent')
         except:
-              self.logger.debug("[SERVER]: Timeout reached. Moving on.")
+            self.logger.debug("[SERVER]: Timeout reached. Moving on.")
 
     def send_packet(self, msg):
         chunks = []
@@ -130,19 +133,23 @@ class Client:
             chunks.append(msg[i:min(i+util.CHUNK_SIZE, len(msg))])
         pkts = []
         starting_seq_num = random.randint(10000, 10000000)
-        for idx, chunk in enumerate(chunks):  
+        for idx, chunk in enumerate(chunks):
             if idx == 0:
-                pkts.append(util.make_packet(msg_type="start", msg=chunk, seqno=starting_seq_num + idx))
+                pkts.append(util.make_packet(msg_type="start",
+                            msg=chunk, seqno=starting_seq_num + idx))
             elif idx == len(chunks) - 1:
-                pkts.append(util.make_packet(msg_type="end", msg=chunk, seqno=starting_seq_num + idx))
+                pkts.append(util.make_packet(msg_type="end",
+                            msg=chunk, seqno=starting_seq_num + idx))
             else:
-                pkts.append(util.make_packet(msg_type="data", msg=chunk, seqno=starting_seq_num + idx))
+                pkts.append(util.make_packet(msg_type="data",
+                            msg=chunk, seqno=starting_seq_num + idx))
         if len(pkts) == 1:
-            pkts.append(util.make_packet(msg_type="end", msg="", seq_no=starting_seq_num + 1))
+            pkts.append(util.make_packet(msg_type="end",
+                        msg="", seqno=starting_seq_num + 1))
         for pkt in pkts:
-            self.sock.sendto(str(pkt).encode('utf-8'), (self.server_addr, self.server_port))       
+            self.sock.sendto(str(pkt).encode('utf-8'),
+                             (self.server_addr, self.server_port))
 
-    
     def recv_packet(self):
         total_msg = ""
         random_number = random.randint(1, 100)
@@ -158,7 +165,8 @@ class Client:
     def exit_client(self):
         disconnect_msg = util.make_message("disconnect", 1, self.username)
         self.send_packet(msg=disconnect_msg)
-        self.logger.debug("[SERVER]: Just sent disconnect packet, will it make it")
+        self.logger.debug(
+            "[SERVER]: Just sent disconnect packet, will it make it")
         time.sleep(0.5)
         print("quitting")
 
@@ -172,7 +180,6 @@ class Client:
         print("-a ADDRESS | --address=ADDRESS The server ip or hostname, defaults to localhost")
         print("-w WINDOW_SIZE | --window=WINDOW_SIZE The window_size, defaults to 3")
         print("-h | --help Print this help")
-
 
 
 # Do not change below part of code
@@ -189,7 +196,7 @@ if __name__ == "__main__":
         print("-h | --help Print this help")
     try:
         OPTS, ARGS = getopt.getopt(sys.argv[1:],
-                                   "u:p:a:w", ["user=", "port=", "address=","window="])
+                                   "u:p:a:w", ["user=", "port=", "address=", "window="])
     except getopt.error:
         helper()
         exit(1)
