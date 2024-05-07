@@ -8,6 +8,8 @@ import util
 import logging
 import threading
 import queue
+import time
+import random
 
 
 class Server:
@@ -25,12 +27,15 @@ class Server:
         self.usernames = dict()
         self.window = window
         self.logger = logging.getLogger(__name__)
-        # seq_no, used to keep track of packets until end packet recieved
-        self.recv_msgs = dict()
-        self.sent_msgs = dict()  # used to keep track of sent packets, in case need to resend
-        self.queue = queue.Queue()
         logging.basicConfig(filename='./logs/server.log',
                             encoding='utf-8', level=logging.DEBUG)
+        self.recv_pkts = dict()  # Mappings from seqno to pkts
+        self.pkt_types = dict()  # Mappings from seqno to pkt type
+        self.recv_starts = dict()  # Mappings from seqno to pkts
+        self.recv_ends = dict()  # Mappings from seqno to pkts
+        self.sent_pkts = dict()  # Mappings from seqno to pkts
+        self.recv_acks = set()
+        self.queue = queue.Queue()
 
     def start(self):
         '''
@@ -144,25 +149,48 @@ class Server:
                 else:
                     self.send_msg_to_user(user, sender, msg_to_send)
 
-    def send_packet(self, msg):
+    def send_packet(self, msg, client_address):
         chunks = []
         for i in range(0, len(msg), util.CHUNK_SIZE):
             chunks.append(msg[i:min(i+util.CHUNK_SIZE, len(msg))])
-        pkts = []
-        for idx, chunk in enumerate(chunks):
-            if idx == 0:
-                pkts.append(util.make_packet(msg_type="start", msg=chunk))
-            elif idx == len(chunks) - 1:
-                pkts.append(util.make_packet(msg_type="end", msg=chunk))
-            else:
-                pkts.append(util.make_packet(msg_type="data", msg=chunk))
-        if len(pkts) == 1:
-            pkts.append(util.make_packet(msg_type="end", msg=""))
-        return chunks
+        starting_seq_num = random.randint(10000, 10000000)
+        pkts_sent = 0
+        start_pkt = util.make_packet(
+            msg_type="start", msg="", seqno=starting_seq_num + pkts_sent)
+        pkts_sent += 1
+        while starting_seq_num + pkts_sent + 1 not in self.recv_acks:
+            time.sleep(0.5)
+            self.sock.sendto(str(start_pkt).encode('utf-8'),
+                             (client_address[0], client_address[1]))
+        seqs = []
+        for _, chunk in enumerate(chunks):
+            data_pkt = util.make_packet(msg_type="data",
+                                        msg=chunk, seqno=starting_seq_num + pkts_sent)
+            self.sent_pkts.update({starting_seq_num + pkts_sent: data_pkt})
+            self.sock.sendto(str(data_pkt).encode('utf-8'),
+                             (client_address[0], client_address[1]))
+            seqs.append(starting_seq_num + pkts_sent + 1)
+            pkts_sent += 1
+        all_found = False
+        while all_found == False:
+            time.sleep(0.5)
+            all_found = True
+            for seq in seqs:
+                if seq not in self.recv_acks:
+                    all_found = False
+                    data_pkt = self.sent_pkts[seq - 1]
+                    self.sock.sendto(str(data_pkt).encode('utf-8'),
+                                     (client_address[0], client_address[1]))
+        end_pkt = util.make_packet(msg_type="end",
+                                   msg="", seqno=starting_seq_num + pkts_sent)
+        while starting_seq_num + pkts_sent + 1 not in self.recv_acks:
+            time.sleep(0.5)
+            self.sock.sendto(str(end_pkt).encode('utf-8'),
+                             (client_address[0], client_address[1]))
 
     def recv_packet(self):
         while True:
-            # Maybe use client address instead of seq_no'ss
+            # Maybe use client address instead of seq_no's
             data, client_address = self.sock.recvfrom(2048)
             decoded_msg = data.decode('utf-8')
             msg_type, seq_no, data, checksum = util.parse_packet(decoded_msg)
@@ -170,21 +198,32 @@ class Server:
             seq_no = int(seq_no)
             if util.validate_checksum(decoded_msg):
                 if msg_type == "start":
-                    self.recv_msgs.update({seq_no: data})
+                    self.pkt_types.update({seq_no: "start"})
+                    self.recv_pkts.update({seq_no: data})
+                    self.send_ack(seq_no + 1, client_address)
                 elif msg_type == "data":
-                    current_msg = self.recv_msgs[seq_no - 1]
-                    del self.recv_msgs[seq_no - 1]
-                    self.recv_msgs.update(
-                        {seq_no: str(current_msg) + str(data)})
+                    self.pkt_types.update({seq_no: "data"})
+                    self.recv_pkts.update({seq_no: data})
+                    self.send_ack(seq_no + 1, client_address)
                 elif msg_type == "end":
-                    current_msg = self.recv_msgs[seq_no - 1]
-                    del self.recv_msgs[seq_no - 1]
-                    self.recv_msgs.update(
-                        {seq_no: str(current_msg) + str(data)})
+                    self.pkt_types.update({seq_no: "end"})
+                    self.recv_pkts.update({seq_no: data})
+                    current_msg = self.get_msg_from_seqs(seq_no)
+                    if current_msg == "":
+                        continue
+                    self.send_ack(seq_no + 1, client_address)
                     self.queue.put(
-                        (str(current_msg) + str(data), client_address))
+                        (str(current_msg), client_address))
                     self.logger.debug(
-                        "[SERVER]: Completed message, " + str(current_msg) + str(data))
+                        "[SERVER]: Completed message, " + str(current_msg))
+                elif msg_type == "ack":
+                    self.recv_acks.add(seq_no)
+
+    def send_ack(self, seqno, client_address):
+        ack_pkt = util.make_packet(msg_type="ack",
+                                   msg="", seqno=seqno)
+        self.sock.sendto(str(ack_pkt).encode('utf-8'),
+                         (client_address[0], client_address[1]))
 
     def send_msg_to_user(self, user, sender, msg_to_send):
         address, port = self.usernames[user]

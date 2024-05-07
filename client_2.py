@@ -11,19 +11,20 @@ import util
 import time
 import logging
 import random
+import queue
 
 
 '''
-Write your code inside this class. 
+Write your code inside this class.
 In the start() function, you will read user-input and act accordingly.
-receive_handler() function is running another thread and you have to listen 
+receive_handler() function is running another thread and you have to listen
 for incoming messages in this function.
 '''
 
 
 class Client:
     '''
-    This is the main Client Class. 
+    This is the main Client Class.
     '''
 
     def __init__(self, username, dest, port, window_size):
@@ -37,11 +38,18 @@ class Client:
         self.logger = logging.getLogger(__name__)
         logging.basicConfig(filename='./logs/client_' + str(username) +
                             '.log', encoding='utf-8', level=logging.DEBUG)
+        self.recv_pkts = dict()  # Mappings from seqno to pkts
+        self.pkt_types = dict()  # Mappings from seqno to pkt type
+        self.recv_starts = dict()  # Mappings from seqno to pkts
+        self.recv_ends = dict()  # Mappings from seqno to pkts
+        self.sent_pkts = dict()  # Mappings from seqno to pkts
+        self.recv_acks = set()
+        self.queue = queue.Queue()
 
     def start(self):
         '''
         Main Loop is here
-        Start by sending the server a JOIN message. 
+        Start by sending the server a JOIN message.
         Use make_message() and make_util() functions from util.py to make your first join packet
         Waits for userinput and then process it
         '''
@@ -90,7 +98,7 @@ class Client:
         '''
         try:
             while True:
-                data, client_address = self.sock.recvfrom(1024)
+                data, client_address = self.sock.recvfrom(2048)
                 self.logger.debug('[RECV_MSG]: packet')
                 decoded_data = data.decode('utf-8')
                 segments = decoded_data.split("|")
@@ -131,36 +139,89 @@ class Client:
         chunks = []
         for i in range(0, len(msg), util.CHUNK_SIZE):
             chunks.append(msg[i:min(i+util.CHUNK_SIZE, len(msg))])
-        pkts = []
         starting_seq_num = random.randint(10000, 10000000)
-        for idx, chunk in enumerate(chunks):
-            if idx == 0:
-                pkts.append(util.make_packet(msg_type="start",
-                            msg=chunk, seqno=starting_seq_num + idx))
-            elif idx == len(chunks) - 1:
-                pkts.append(util.make_packet(msg_type="end",
-                            msg=chunk, seqno=starting_seq_num + idx))
-            else:
-                pkts.append(util.make_packet(msg_type="data",
-                            msg=chunk, seqno=starting_seq_num + idx))
-        if len(pkts) == 1:
-            pkts.append(util.make_packet(msg_type="end",
-                        msg="", seqno=starting_seq_num + 1))
-        for pkt in pkts:
-            self.sock.sendto(str(pkt).encode('utf-8'),
+        pkts_sent = 0
+        start_pkt = util.make_packet(
+            msg_type="start", msg="", seqno=starting_seq_num + pkts_sent)
+        pkts_sent += 1
+        while starting_seq_num + pkts_sent + 1 not in self.recv_acks:
+            time.sleep(0.5)
+            self.sock.sendto(str(start_pkt).encode('utf-8'),
+                             (self.server_addr, self.server_port))
+        seqs = []
+        for _, chunk in enumerate(chunks):
+            data_pkt = util.make_packet(msg_type="data",
+                                        msg=chunk, seqno=starting_seq_num + pkts_sent)
+            self.sent_pkts.update({starting_seq_num + pkts_sent: data_pkt})
+            self.sock.sendto(str(data_pkt).encode('utf-8'),
+                             (self.server_addr, self.server_port))
+            seqs.append(starting_seq_num + pkts_sent + 1)
+            pkts_sent += 1
+        all_found = False
+        while all_found == False:
+            time.sleep(0.5)
+            all_found = True
+            for seq in seqs:
+                if seq not in self.recv_acks:
+                    all_found = False
+                    data_pkt = self.sent_pkts[seq - 1]
+                    self.sock.sendto(str(data_pkt).encode('utf-8'),
+                                     (self.server_addr, self.server_port))
+        end_pkt = util.make_packet(msg_type="end",
+                                   msg="", seqno=starting_seq_num + pkts_sent)
+        while starting_seq_num + pkts_sent + 1 not in self.recv_acks:
+            time.sleep(0.5)
+            self.sock.sendto(str(end_pkt).encode('utf-8'),
                              (self.server_addr, self.server_port))
 
     def recv_packet(self):
-        total_msg = ""
-        random_number = random.randint(1, 100)
         while True:
-            data, client_address = self.sock.recvfrom(1024)
+            # Maybe use client address instead of seq_no's
+            data, client_address = self.sock.recvfrom(2048)
             decoded_msg = data.decode('utf-8')
             msg_type, seq_no, data, checksum = util.parse_packet(decoded_msg)
+            # print(seq_no)
+            seq_no = int(seq_no)
             if util.validate_checksum(decoded_msg):
-                total_msg += data
-                if msg_type == "ack":
-                    return total_msg
+                if msg_type == "start":
+                    self.pkt_types.update({seq_no: "start"})
+                    self.recv_pkts.update({seq_no: data})
+                    self.send_ack(seq_no + 1)
+                elif msg_type == "data":
+                    self.pkt_types.update({seq_no: "data"})
+                    self.recv_pkts.update({seq_no: data})
+                    self.send_ack(seq_no + 1)
+                elif msg_type == "end":
+                    self.pkt_types.update({seq_no: "end"})
+                    self.recv_pkts.update({seq_no: data})
+                    current_msg = self.get_msg_from_seqs(seq_no)
+                    if current_msg == "":
+                        continue
+                    self.send_ack(seq_no + 1)
+                    self.queue.put(
+                        (str(current_msg), client_address))
+                    self.logger.debug(
+                        "[SERVER]: Completed message, " + str(current_msg))
+                elif msg_type == "ack":
+                    self.recv_acks.add(seq_no)
+
+    def get_msg_from_seqs(self, seq_no):
+        current_msg = ""
+        curr_seq = seq_no
+        while curr_seq in self.pkt_types.keys():
+            current_msg = self.recv_pkts[seq_no] + current_msg
+            if self.pkt_types[curr_seq] == "start":
+                break
+            curr_seq -= 1
+        if self.pkt_types[curr_seq] != "start":
+            return ""
+        return current_msg
+
+    def send_ack(self, seqno):
+        ack_pkt = util.make_packet(msg_type="ack",
+                                   msg="", seqno=seqno)
+        self.sock.sendto(str(ack_pkt).encode('utf-8'),
+                         (self.server_addr, self.server_port))
 
     def exit_client(self):
         disconnect_msg = util.make_message("disconnect", 1, self.username)
