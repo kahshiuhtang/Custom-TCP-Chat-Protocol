@@ -141,7 +141,9 @@ class Server:
                     print("msg: " + str(sender) +
                           " to non-existent user " + user)
                 else:
-                    self.send_msg_to_user(user, sender, msg_to_send)
+                    T = threading.Thread(target=self.send_msg_to_user, args=(user, sender, msg_to_send))
+                    T.daemon = True
+                    T.start()
 
     def send_packet(self, msg, client_address):
         chunks = []
@@ -160,6 +162,7 @@ class Server:
             time.sleep(0.5)
         pkts_sent += 1
         seqs = []
+        self.mutex.acquire()
         for _, chunk in enumerate(chunks):
             data_pkt = util.make_packet(msg_type="data",
                                         msg=chunk, seqno=starting_seq_num + pkts_sent)
@@ -170,6 +173,7 @@ class Server:
             self.sock.sendto(str(data_pkt).encode('utf-8'),
                                      (client_address[0], client_address[1]))
             pkts_sent += 1
+        self.mutex.release()
         all_found = False
         time.sleep(0.05)
         while all_found == False:
@@ -208,20 +212,26 @@ class Server:
                 if msg_type == "start":
                     self.logger.debug(
                         '[PKT]: Received START Packet' + str(seq_no))
+                    self.mutex.acquire()
                     self.pkt_types.update({seq_no: "start"})
                     self.recv_pkts.update({seq_no: data})
+                    self.mutex.release()
                     self.send_ack(seq_no + 1, client_address)
                 elif msg_type == "data":
                     self.logger.debug(
                         '[PKT]: Received DATA Packet' + str(seq_no))
+                    self.mutex.acquire()
                     self.pkt_types.update({seq_no: "data"})
                     self.recv_pkts.update({seq_no: data})
+                    self.mutex.release()
                     self.send_ack(seq_no + 1, client_address)
                 elif msg_type == "end":
                     self.logger.debug(
                         '[PKT]: Received END Packet' + str(seq_no))
+                    self.mutex.acquire()
                     self.pkt_types.update({seq_no: "end"})
                     self.recv_pkts.update({seq_no: data})
+                    self.mutex.release()
                     current_msg = self.get_msg_from_seqs(seq_no)
                     self.logger.debug('[PKT]: End Packet' + str(seq_no))
                     if current_msg == "":
@@ -235,11 +245,14 @@ class Server:
                         "[SERVER]: Completed message, " + str(current_msg))
                 elif msg_type == "ack":
                     self.logger.debug('[PKT]: Received ACK' + str(seq_no))
+                    self.mutex.acquire()
                     self.recv_acks.add(seq_no)
+                    self.mutex.release()
 
     def get_msg_from_seqs(self, seq_no):
         current_msg = ""
         curr_seq = seq_no
+        self.mutex.acquire()
         while curr_seq in self.pkt_types.keys():
             self.logger.debug('[MSG_FROM_SEQS]: Looking for' + str(curr_seq))
             current_msg = self.recv_pkts[curr_seq] + current_msg
@@ -248,12 +261,15 @@ class Server:
             curr_seq -= 1
         if curr_seq not in self.pkt_types or self.pkt_types[curr_seq] != "start":
             self.logger.debug('[MSG_FROM_SEQS]: Hmm... missing packets')
+            self.mutex.release()
             return ""
         if curr_seq in self.completed_pkts:
             self.logger.debug(
                 '[MSG_FROM_SEQS]: Already have processed this completed packet, will not send upward')
+            self.mutex.release()
             return ""
         self.completed_pkts.add(curr_seq)
+        self.mutex.release()
         return current_msg
 
     def send_ack(self, seqno, client_address):
