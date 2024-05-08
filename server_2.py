@@ -35,7 +35,9 @@ class Server:
         self.recv_ends = dict()  # Mappings from seqno to pkts
         self.sent_pkts = dict()  # Mappings from seqno to pkts
         self.recv_acks = set()
+        self.completed_pkts = set()
         self.queue = queue.Queue()
+        self.mutex = threading.Lock()
 
     def start(self):
         '''
@@ -56,9 +58,6 @@ class Server:
                 self.logger.debug(segments)
                 self.logger.debug("FROM: ")
                 self.logger.debug(client_address)
-                if len(segments) < 3:
-                    self.logger.debug('[ERROR]: Wrong sized packet')
-                    continue
                 msg = segments
                 if msg[0] == "join":
                     self.logger.debug('[MSG]: Join')
@@ -71,17 +70,15 @@ class Server:
                         self.logger.debug('[SERVER]: Max clients hit in JOIN')
                         full_serv_msg = util.make_message(
                             msg_type="err_server_full", msg_format=2)
-                        pkt = util.make_packet(msg=full_serv_msg)
-                        self.sock.sendto(pkt.encode('utf-8'),
-                                         (client_address[0], client_address[1]))
+                        self.send_packet(
+                            msg=full_serv_msg, client_address=client_address)
                         continue
                     if name in self.usernames.keys():
                         self.logger.debug('[SERVER]: Name found in usernames')
                         used_msg = util.make_message(
                             msg_type="err_username_unavailable", msg_format=2)
-                        pkt = util.make_packet(msg=used_msg)
-                        self.sock.sendto(pkt.encode('utf-8'),
-                                         (client_address[0], client_address[1]))
+                        self.send_packet(
+                            msg=used_msg, client_address=client_address)
                     else:
                         self.logger.debug(
                             'Adding this username to list of usernames')
@@ -92,10 +89,8 @@ class Server:
                     user_string = self.generate_users()
                     users_msg = util.make_message(
                         msg_type="response_users_list", msg_format=3, message=user_string)
-                    pkt = util.make_packet(msg=users_msg)
-                    self.logger.debug(pkt)
-                    self.sock.sendto(pkt.encode('utf-8'),
-                                     (client_address[0], client_address[1]))
+                    self.send_packet(
+                        msg=users_msg, client_address=client_address)
                     username = self.get_username(client_address=client_address)
                     print("request_users_list: " + str(username))
                 elif msg[0] == "send_message":
@@ -110,11 +105,10 @@ class Server:
                     self.handle_disconnect(name)
                 else:
                     self.logger.debug('[MSG]: Unknown Message')
-                    used_msg = util.make_message(
+                    unknown_msg = util.make_message(
                         msg_type="err_unknown_message", msg_format=2)
-                    pkt = util.make_packet(msg=used_msg)
-                    self.sock.sendto(pkt.encode('utf-8'),
-                                     (client_address[0], client_address[1]))
+                    self.send_packet(
+                        msg=unknown_msg, client_address=client_address)
                     username = self.get_username(client_address=client_address)
                     self.handle_disconnect(username)
                     print("disconnected: " + username + " sent unknown command")
@@ -245,6 +239,11 @@ class Server:
         if self.pkt_types[curr_seq] != "start":
             self.logger.debug('[MSG_FROM_SEQS]: Hmm... missing packets')
             return ""
+        if curr_seq in self.completed_pkts:
+            self.logger.debug(
+                '[MSG_FROM_SEQS]: Already have processed this completed packet, will not send upward')
+            return ""
+        self.completed_pkts.add(curr_seq)
         return current_msg
 
     def send_ack(self, seqno, client_address):
@@ -258,11 +257,7 @@ class Server:
         msg_content = "1 " + sender + " " + msg_to_send
         send_msg_user = util.make_message(
             msg_type="forward_message", msg_format=4, message=msg_content)
-        pkt = util.make_packet(msg=send_msg_user)
-        self.logger.debug(pkt)
-        self.logger.debug(address)
-        self.logger.debug(port)
-        self.sock.sendto(pkt.encode('utf-8'), (address, port))
+        self.send_packet(msg=send_msg_user, client_address=(address, port))
 
     def generate_users(self):
         num_users = len(self.usernames)

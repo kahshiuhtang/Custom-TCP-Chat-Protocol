@@ -6,6 +6,7 @@ import getopt
 import socket
 import random
 from threading import Thread
+import threading
 import os
 import util
 import time
@@ -44,6 +45,8 @@ class Client:
         self.recv_ends = dict()  # Mappings from seqno to pkts
         self.sent_pkts = dict()  # Mappings from seqno to pkts
         self.recv_acks = set()
+        self.completed_pkts = set()
+        self.mutex = threading.Lock()
         self.queue = queue.Queue()
 
     def start(self):
@@ -108,12 +111,12 @@ class Client:
                 msg = segments
                 if msg[0] == "response_users_list":
                     self.logger.debug('[RECV_MSG]: response_users_list')
-                    sent_message_whole = segments[2].split()
+                    sent_message_whole = segments
                     comb_msg = " ".join(sent_message_whole[3:])
                     print("list: " + comb_msg)
                 elif msg[0] == "forward_message":
                     self.logger.debug('[RECV_MSG]: forward_message')
-                    sent_message_whole = segments[2].split()
+                    sent_message_whole = segments
                     sender = sent_message_whole[3]
                     comb_msg = " ".join(sent_message_whole[4:])
                     print("msg: " + sender + ": " + comb_msg)
@@ -235,6 +238,11 @@ class Client:
         if self.pkt_types[curr_seq] != "start":
             self.logger.debug('[MSG_FROM_SEQS]: Hmm... missing packets')
             return ""
+        if curr_seq in self.completed_pkts:
+            self.logger.debug(
+                '[MSG_FROM_SEQS]: Already have processed this completed packet, will not send upward')
+            return ""
+        self.completed_pkts.add(curr_seq)
         return current_msg
 
     def send_ack(self, seqno):
