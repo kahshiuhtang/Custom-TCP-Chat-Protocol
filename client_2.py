@@ -96,14 +96,16 @@ class Client:
         '''
         Waits for a message from server and process it accordingly
         '''
+        T = Thread(target=self.recv_packet)
+        T.daemon = True
+        T.start()
         try:
             while True:
-                data, client_address = self.sock.recvfrom(2048)
+                data, client_address = self.queue.get()
+                segments = data.split()
                 self.logger.debug('[RECV_MSG]: packet')
-                decoded_data = data.decode('utf-8')
-                segments = decoded_data.split("|")
                 self.logger.debug(segments)
-                msg = segments[2].split()
+                msg = segments
                 if msg[0] == "response_users_list":
                     self.logger.debug('[RECV_MSG]: response_users_list')
                     sent_message_whole = segments[2].split()
@@ -132,8 +134,9 @@ class Client:
                     return
                 else:
                     self.logger.debug('[RECV_MSG]: Unknown message sent')
-        except:
-            self.logger.debug("[SERVER]: Timeout reached. Moving on.")
+        except Exception as e:
+            self.logger.debug("[Client]: Ran into error on receive: ")
+            self.logger.debug(e)
 
     def send_packet(self, msg):
         chunks = []
@@ -143,11 +146,12 @@ class Client:
         pkts_sent = 0
         start_pkt = util.make_packet(
             msg_type="start", msg="", seqno=starting_seq_num + pkts_sent)
-        pkts_sent += 1
         while starting_seq_num + pkts_sent + 1 not in self.recv_acks:
             time.sleep(0.5)
+            self.logger.debug('[PKT]: Sending Start Packet')
             self.sock.sendto(str(start_pkt).encode('utf-8'),
                              (self.server_addr, self.server_port))
+        pkts_sent += 1
         seqs = []
         for _, chunk in enumerate(chunks):
             data_pkt = util.make_packet(msg_type="data",
@@ -158,62 +162,78 @@ class Client:
             seqs.append(starting_seq_num + pkts_sent + 1)
             pkts_sent += 1
         all_found = False
+        self.logger.debug('[PKT]: Starting to check that all ACKs arrived')
         while all_found == False:
             time.sleep(0.5)
+            self.logger.debug('[PKT]: Checking that all ACKS arrived')
             all_found = True
             for seq in seqs:
                 if seq not in self.recv_acks:
                     all_found = False
+                    self.logger.debug(
+                        '[PKT]: ACK Not Arrived: ' + str(seq - 1))
                     data_pkt = self.sent_pkts[seq - 1]
                     self.sock.sendto(str(data_pkt).encode('utf-8'),
                                      (self.server_addr, self.server_port))
         end_pkt = util.make_packet(msg_type="end",
                                    msg="", seqno=starting_seq_num + pkts_sent)
+        self.logger.debug('[PKT]: Starting to send END PKT')
         while starting_seq_num + pkts_sent + 1 not in self.recv_acks:
             time.sleep(0.5)
             self.sock.sendto(str(end_pkt).encode('utf-8'),
                              (self.server_addr, self.server_port))
+            self.logger.debug('[PKT]: Sending END PKT')
 
     def recv_packet(self):
+        self.logger.debug('[PKT]: Starting to read in packets')
         while True:
             # Maybe use client address instead of seq_no's
             data, client_address = self.sock.recvfrom(2048)
+            self.logger.debug('[PKT]: Received a packet')
             decoded_msg = data.decode('utf-8')
             msg_type, seq_no, data, checksum = util.parse_packet(decoded_msg)
             # print(seq_no)
             seq_no = int(seq_no)
             if util.validate_checksum(decoded_msg):
+                self.logger.debug('[PKT]: Valid Packet Received')
                 if msg_type == "start":
+                    self.logger.debug('[PKT]: Start Packet' + str(seq_no))
                     self.pkt_types.update({seq_no: "start"})
                     self.recv_pkts.update({seq_no: data})
                     self.send_ack(seq_no + 1)
                 elif msg_type == "data":
+                    self.logger.debug('[PKT]: Data Packet' + str(seq_no))
                     self.pkt_types.update({seq_no: "data"})
                     self.recv_pkts.update({seq_no: data})
                     self.send_ack(seq_no + 1)
                 elif msg_type == "end":
+                    self.logger.debug('[PKT]: End Packet' + str(seq_no))
                     self.pkt_types.update({seq_no: "end"})
                     self.recv_pkts.update({seq_no: data})
                     current_msg = self.get_msg_from_seqs(seq_no)
                     if current_msg == "":
                         continue
+                    self.logger.debug('[PKT]: Concatenated MSG together')
                     self.send_ack(seq_no + 1)
                     self.queue.put(
                         (str(current_msg), client_address))
                     self.logger.debug(
-                        "[SERVER]: Completed message, " + str(current_msg))
+                        "[PKT]: Completed message, " + str(current_msg))
                 elif msg_type == "ack":
+                    self.logger.debug('[PKT]: Received ACK' + str(seq_no))
                     self.recv_acks.add(seq_no)
 
     def get_msg_from_seqs(self, seq_no):
         current_msg = ""
         curr_seq = seq_no
         while curr_seq in self.pkt_types.keys():
-            current_msg = self.recv_pkts[seq_no] + current_msg
+            self.logger.debug('[MSG_FROM_SEQS]: Looking for' + str(curr_seq))
+            current_msg = self.recv_pkts[curr_seq] + current_msg
             if self.pkt_types[curr_seq] == "start":
                 break
             curr_seq -= 1
         if self.pkt_types[curr_seq] != "start":
+            self.logger.debug('[MSG_FROM_SEQS]: Hmm... missing packets')
             return ""
         return current_msg
 

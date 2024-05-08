@@ -157,11 +157,11 @@ class Server:
         pkts_sent = 0
         start_pkt = util.make_packet(
             msg_type="start", msg="", seqno=starting_seq_num + pkts_sent)
-        pkts_sent += 1
         while starting_seq_num + pkts_sent + 1 not in self.recv_acks:
             time.sleep(0.5)
             self.sock.sendto(str(start_pkt).encode('utf-8'),
                              (client_address[0], client_address[1]))
+        pkts_sent += 1
         seqs = []
         for _, chunk in enumerate(chunks):
             data_pkt = util.make_packet(msg_type="data",
@@ -192,32 +192,60 @@ class Server:
         while True:
             # Maybe use client address instead of seq_no's
             data, client_address = self.sock.recvfrom(2048)
+            self.logger.debug('[PKT]: Received Packet')
             decoded_msg = data.decode('utf-8')
             msg_type, seq_no, data, checksum = util.parse_packet(decoded_msg)
             # print(seq_no)
             seq_no = int(seq_no)
+            self.logger.debug(
+                '[PKT]: Checking that packet checksum is valid for ' + str(seq_no))
             if util.validate_checksum(decoded_msg):
+                self.logger.debug('[PKT]: Packet is valid.')
                 if msg_type == "start":
+                    self.logger.debug(
+                        '[PKT]: Received START Packet' + str(seq_no))
                     self.pkt_types.update({seq_no: "start"})
                     self.recv_pkts.update({seq_no: data})
                     self.send_ack(seq_no + 1, client_address)
                 elif msg_type == "data":
+                    self.logger.debug(
+                        '[PKT]: Received DATA Packet' + str(seq_no))
                     self.pkt_types.update({seq_no: "data"})
                     self.recv_pkts.update({seq_no: data})
                     self.send_ack(seq_no + 1, client_address)
                 elif msg_type == "end":
+                    self.logger.debug(
+                        '[PKT]: Received END Packet' + str(seq_no))
                     self.pkt_types.update({seq_no: "end"})
                     self.recv_pkts.update({seq_no: data})
                     current_msg = self.get_msg_from_seqs(seq_no)
+                    self.logger.debug('[PKT]: End Packet' + str(seq_no))
                     if current_msg == "":
                         continue
+                    self.logger.debug(
+                        '[PKT]: Received Full Packet With all ACKS')
                     self.send_ack(seq_no + 1, client_address)
                     self.queue.put(
                         (str(current_msg), client_address))
                     self.logger.debug(
                         "[SERVER]: Completed message, " + str(current_msg))
                 elif msg_type == "ack":
+                    self.logger.debug('[PKT]: Received ACK' + str(seq_no))
                     self.recv_acks.add(seq_no)
+
+    def get_msg_from_seqs(self, seq_no):
+        current_msg = ""
+        curr_seq = seq_no
+        while curr_seq in self.pkt_types.keys():
+            self.logger.debug('[MSG_FROM_SEQS]: Looking for' + str(curr_seq))
+            current_msg = self.recv_pkts[curr_seq] + current_msg
+            if self.pkt_types[curr_seq] == "start":
+                break
+            curr_seq -= 1
+        if self.pkt_types[curr_seq] != "start":
+            self.logger.debug('[MSG_FROM_SEQS]: Hmm... missing packets')
+            return ""
+        return current_msg
 
     def send_ack(self, seqno, client_address):
         ack_pkt = util.make_packet(msg_type="ack",
