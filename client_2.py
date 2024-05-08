@@ -84,6 +84,9 @@ class Client:
                 pass
 
     def generate_msg_string(self, input_words):
+        '''
+        Combine together to get the message that is being sent to each user
+        '''
         msg_content = input_words[1] + " "
         for entry_count in range(0, int(input_words[1])):
             msg_content += input_words[2 + entry_count] + " "
@@ -92,6 +95,9 @@ class Client:
         return msg_content
 
     def send_join(self):
+        '''
+        Create and send a JOIN message
+        '''
         join_msg = util.make_message("join", 1, self.username)
         self.send_packet(msg=join_msg)
 
@@ -142,6 +148,9 @@ class Client:
             self.logger.debug(e)
 
     def send_packet(self, msg):
+        '''
+        Send a packet and wait for the appropriate ACKs
+        '''
         chunks = []
         for i in range(0, len(msg), util.CHUNK_SIZE):
             chunks.append(msg[i:min(i+util.CHUNK_SIZE, len(msg))])
@@ -150,14 +159,14 @@ class Client:
         start_pkt = util.make_packet(
             msg_type="start", msg="", seqno=starting_seq_num + pkts_sent)
         self.sock.sendto(str(start_pkt).encode('utf-8'),
-                             (self.server_addr, self.server_port))
+                         (self.server_addr, self.server_port))
         time.sleep(0.05)
         while starting_seq_num + pkts_sent + 1 not in self.recv_acks:
             self.logger.debug('[PKT]: Sending Start Packet')
             time.sleep(0.5)
             self.sock.sendto(str(start_pkt).encode('utf-8'),
                              (self.server_addr, self.server_port))
-            
+
         pkts_sent += 1
         seqs = []
         self.mutex.acquire()
@@ -168,8 +177,6 @@ class Client:
             self.sock.sendto(str(data_pkt).encode('utf-8'),
                              (self.server_addr, self.server_port))
             seqs.append(starting_seq_num + pkts_sent + 1)
-            self.sock.sendto(str(data_pkt).encode('utf-8'),
-                                     (self.server_addr, self.server_port))
             pkts_sent += 1
         self.mutex.release()
         all_found = False
@@ -192,7 +199,7 @@ class Client:
                                    msg="", seqno=starting_seq_num + pkts_sent)
         self.logger.debug('[PKT]: Starting to send END PKT')
         self.sock.sendto(str(end_pkt).encode('utf-8'),
-                             (self.server_addr, self.server_port))
+                         (self.server_addr, self.server_port))
         time.sleep(0.05)
         while starting_seq_num + pkts_sent + 1 not in self.recv_acks:
             self.sock.sendto(str(end_pkt).encode('utf-8'),
@@ -201,6 +208,9 @@ class Client:
             self.logger.debug('[PKT]: Sending END PKT')
 
     def recv_packet(self):
+        '''
+        Handle all incoming packets, will combine them and send to packet handler when the END packet has arrived
+        '''
         self.logger.debug('[PKT]: Starting to read in packets')
         while True:
             # Maybe use client address instead of seq_no's
@@ -250,6 +260,9 @@ class Client:
                     self.mutex.release()
 
     def get_msg_from_seqs(self, seq_no):
+        '''
+        From the sequence number of the ACK, reconstruct the data 
+        '''
         current_msg = ""
         curr_seq = seq_no
         self.mutex.acquire()
@@ -273,12 +286,18 @@ class Client:
         return current_msg
 
     def send_ack(self, seqno):
+        '''
+        Send an ACK, given a sequence number
+        '''
         ack_pkt = util.make_packet(msg_type="ack",
                                    msg="", seqno=seqno)
         self.sock.sendto(str(ack_pkt).encode('utf-8'),
                          (self.server_addr, self.server_port))
 
     def exit_client(self):
+        '''
+        Send a disconnect and then print out quitting
+        '''
         disconnect_msg = util.make_message("disconnect", 1, self.username)
         self.send_packet(msg=disconnect_msg)
         self.logger.debug(
