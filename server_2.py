@@ -151,10 +151,13 @@ class Server:
         pkts_sent = 0
         start_pkt = util.make_packet(
             msg_type="start", msg="", seqno=starting_seq_num + pkts_sent)
+        self.sock.sendto(str(start_pkt).encode('utf-8'),
+                             (client_address[0], client_address[1]))
+        time.sleep(0.05)
         while starting_seq_num + pkts_sent + 1 not in self.recv_acks:
-            time.sleep(0.5)
             self.sock.sendto(str(start_pkt).encode('utf-8'),
                              (client_address[0], client_address[1]))
+            time.sleep(0.5)
         pkts_sent += 1
         seqs = []
         for _, chunk in enumerate(chunks):
@@ -164,10 +167,12 @@ class Server:
             self.sock.sendto(str(data_pkt).encode('utf-8'),
                              (client_address[0], client_address[1]))
             seqs.append(starting_seq_num + pkts_sent + 1)
+            self.sock.sendto(str(data_pkt).encode('utf-8'),
+                                     (client_address[0], client_address[1]))
             pkts_sent += 1
         all_found = False
+        time.sleep(0.05)
         while all_found == False:
-            time.sleep(0.5)
             all_found = True
             for seq in seqs:
                 if seq not in self.recv_acks:
@@ -175,12 +180,17 @@ class Server:
                     data_pkt = self.sent_pkts[seq - 1]
                     self.sock.sendto(str(data_pkt).encode('utf-8'),
                                      (client_address[0], client_address[1]))
+            if all_found == False:
+                time.sleep(0.5)
         end_pkt = util.make_packet(msg_type="end",
                                    msg="", seqno=starting_seq_num + pkts_sent)
+        self.sock.sendto(str(end_pkt).encode('utf-8'),
+                             (client_address[0], client_address[1]))
+        time.sleep(0.05)
         while starting_seq_num + pkts_sent + 1 not in self.recv_acks:
-            time.sleep(0.5)
             self.sock.sendto(str(end_pkt).encode('utf-8'),
                              (client_address[0], client_address[1]))
+            time.sleep(0.5)
 
     def recv_packet(self):
         while True:
@@ -236,7 +246,7 @@ class Server:
             if self.pkt_types[curr_seq] == "start":
                 break
             curr_seq -= 1
-        if self.pkt_types[curr_seq] != "start":
+        if curr_seq not in self.pkt_types or self.pkt_types[curr_seq] != "start":
             self.logger.debug('[MSG_FROM_SEQS]: Hmm... missing packets')
             return ""
         if curr_seq in self.completed_pkts:
