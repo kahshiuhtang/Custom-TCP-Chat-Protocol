@@ -104,7 +104,7 @@ class Server:
                 elif msg[0] == "disconnect":
                     # Disconnect a user
                     self.logger.debug('[MSG]: Disconnect')
-                    if len(msg) < 3:
+                    if len(msg) < 3: # Protect against some issues from accesssing array, avoid crash
                         self.logger.debug(
                             '[ERROR]: Invalid message content for disconnect')
                         continue

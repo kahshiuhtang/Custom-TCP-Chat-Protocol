@@ -56,19 +56,20 @@ class Client:
         Use make_message() and make_util() functions from util.py to make your first join packet
         Waits for userinput and then process it
         '''
-        self.send_join()
+        self.send_join() # Send initial JOIN message
         while True:
-            message = input("")
+            message = input("") # Take in the input
             if message.lower() == 'quit':
                 self.logger.debug('[INPUT_MSG]: Quit')
                 self.exit_client()
                 break
-            input_words = message.split()
-            cmd = input_words[0].lower()
-
+            input_words = message.split() # Split the message
+            cmd = input_words[0].lower() # Take out the command
+            
+            # IF ELSE statements to see what the correct move is
             if cmd == "msg":
                 self.logger.debug('[INPUT_MSG]: Msg')
-                msg_content = self.generate_msg_string(input_words=input_words)
+                msg_content = self.generate_msg_string(input_words=input_words) # Generate the users + message string
                 send_msg = util.make_message("send_message", 4, msg_content)
                 self.send_packet(msg=send_msg)
             elif cmd == "list":
@@ -85,13 +86,14 @@ class Client:
 
     def generate_msg_string(self, input_words):
         '''
-        Combine together to get the message that is being sent to each user
+        From the list of input words, extract out the users and actual message
+
         '''
         msg_content = input_words[1] + " "
-        for entry_count in range(0, int(input_words[1])):
+        for entry_count in range(0, int(input_words[1])): # Extract out the intended end users
             msg_content += input_words[2 + entry_count] + " "
-        actual_msg = " ".join(input_words[int(input_words[1]) + 2:])
-        msg_content = msg_content + actual_msg
+        actual_msg = " ".join(input_words[int(input_words[1]) + 2:]) # Take the message out 
+        msg_content = msg_content + actual_msg # Concatenate together users and message
         return msg_content
 
     def send_join(self):
@@ -105,41 +107,41 @@ class Client:
         '''
         Waits for a message from server and process it accordingly
         '''
-        T = Thread(target=self.recv_packet)
-        T.daemon = True
+        T = Thread(target=self.recv_packet) # Create a thread (recv_packet) that handles the incoming packets
+        T.daemon = True # receive_handler thread will handle the messages sent after they have been reconstructed
         T.start()
         try:
             while True:
-                data, client_address = self.queue.get()
+                data, client_address = self.queue.get() # Where reconstructed messages will be put inot
                 segments = data.split()
                 self.logger.debug('[RECV_MSG]: packet')
                 self.logger.debug(segments)
-                msg = segments
+                msg = segments # Split the message into individual strings
                 if msg[0] == "response_users_list":
                     self.logger.debug('[RECV_MSG]: response_users_list')
                     sent_message_whole = segments
-                    comb_msg = " ".join(sent_message_whole[3:])
+                    comb_msg = " ".join(sent_message_whole[3:]) # Take out the list of users and print it
                     print("list: " + comb_msg)
                 elif msg[0] == "forward_message":
                     self.logger.debug('[RECV_MSG]: forward_message')
                     sent_message_whole = segments
                     sender = sent_message_whole[3]
-                    comb_msg = " ".join(sent_message_whole[4:])
+                    comb_msg = " ".join(sent_message_whole[4:]) # Print out the message that was given
                     print("msg: " + sender + ": " + comb_msg)
                 elif msg[0] == "err_unknown_message":
                     self.logger.debug('[RECV_MSG]: err_unknown_message')
                     print("disconnected: server received an unknown command")
-                    self.exit_client()
+                    self.exit_client() # Disconnect since we don't know what has gone wrong
                     return
                 elif msg[0] == "err_server_full":
                     self.logger.debug('[RECV_MSG]: err_server_full')
                     print("disconnected: server full")
-                    self.exit_client()
+                    self.exit_client() # Disconnect since we don't know what has gone wrong
                     return
                 elif msg[0] == "err_username_unavailable":
                     self.logger.debug('[RECV_MSG]: err_username_unavailable')
                     print("disconnected: username not available")
-                    self.exit_client()
+                    self.exit_client() # Disconnect since we don't know what has gone wrong
                     return
                 else:
                     self.logger.debug('[RECV_MSG]: Unknown message sent')
@@ -151,56 +153,61 @@ class Client:
         '''
         Send a packet and wait for the appropriate ACKs
         '''
-        chunks = []
+        chunks = [] # Split up message into chunks
         for i in range(0, len(msg), util.CHUNK_SIZE):
             chunks.append(msg[i:min(i+util.CHUNK_SIZE, len(msg))])
-        starting_seq_num = random.randint(10000, 10000000)
-        pkts_sent = 0
+        starting_seq_num = random.randint(10000, 10000000) # Choose random seq_no
+        pkts_sent = 0 # Keep track of packets sent
+        # Create START packet and wait for ACK
         start_pkt = util.make_packet(
             msg_type="start", msg="", seqno=starting_seq_num + pkts_sent)
         self.sock.sendto(str(start_pkt).encode('utf-8'),
                          (self.server_addr, self.server_port))
         time.sleep(0.05)
+        # While ACK has not arrived, just keep sending in interval
         while starting_seq_num + pkts_sent + 1 not in self.recv_acks:
             self.logger.debug('[PKT]: Sending Start Packet')
             time.sleep(0.5)
             self.sock.sendto(str(start_pkt).encode('utf-8'),
                              (self.server_addr, self.server_port))
-
         pkts_sent += 1
-        seqs = []
+        seqs = [] # Keep track of seq_no's that we are expecting
         self.mutex.acquire()
+        # For every chunk, send a packet
         for _, chunk in enumerate(chunks):
             data_pkt = util.make_packet(msg_type="data",
                                         msg=chunk, seqno=starting_seq_num + pkts_sent)
             self.sent_pkts.update({starting_seq_num + pkts_sent: data_pkt})
             self.sock.sendto(str(data_pkt).encode('utf-8'),
                              (self.server_addr, self.server_port))
-            seqs.append(starting_seq_num + pkts_sent + 1)
+            seqs.append(starting_seq_num + pkts_sent + 1) # Keep track of expected ACKs
             pkts_sent += 1
         self.mutex.release()
         all_found = False
         self.logger.debug('[PKT]: Starting to check that all ACKs arrived')
         time.sleep(0.05)
+        # Check if we got all the ACKS
         while all_found == False:
             self.logger.debug('[PKT]: Checking that all ACKS arrived')
             all_found = True
-            for seq in seqs:
+            for seq in seqs: # Go through all the ACKs that we are expecting
                 if seq not in self.recv_acks:
-                    all_found = False
+                    all_found = False # If we don't find all the ACKs, we need to resend
                     self.logger.debug(
                         '[PKT]: ACK Not Arrived: ' + str(seq - 1))
                     data_pkt = self.sent_pkts[seq - 1]
                     self.sock.sendto(str(data_pkt).encode('utf-8'),
                                      (self.server_addr, self.server_port))
             if all_found == False:
-                time.sleep(0.5)
+                time.sleep(0.5) # Sleep interval
+        # Create and send the END packet
         end_pkt = util.make_packet(msg_type="end",
                                    msg="", seqno=starting_seq_num + pkts_sent)
         self.logger.debug('[PKT]: Starting to send END PKT')
         self.sock.sendto(str(end_pkt).encode('utf-8'),
                          (self.server_addr, self.server_port))
         time.sleep(0.05)
+        # If we don't get the packet, we should resend it 
         while starting_seq_num + pkts_sent + 1 not in self.recv_acks:
             self.sock.sendto(str(end_pkt).encode('utf-8'),
                              (self.server_addr, self.server_port))
@@ -218,8 +225,9 @@ class Client:
             self.logger.debug('[PKT]: Received a packet')
             decoded_msg = data.decode('utf-8')
             msg_type, seq_no, data, checksum = util.parse_packet(decoded_msg)
-            # print(seq_no)
             seq_no = int(seq_no)
+            # Check the checksum
+            # Want to track each packet that arrived, the packet type and send an ACK for START and DATA packets
             if util.validate_checksum(decoded_msg):
                 self.logger.debug('[PKT]: Valid Packet Received')
                 if msg_type == "start":
@@ -228,59 +236,63 @@ class Client:
                     self.pkt_types.update({seq_no: "start"})
                     self.recv_pkts.update({seq_no: data})
                     self.mutex.release()
-                    self.send_ack(seq_no + 1)
+                    self.send_ack(seq_no + 1) # Send an ACK for what we recieved
                 elif msg_type == "data":
                     self.logger.debug('[PKT]: Data Packet' + str(seq_no))
                     self.mutex.acquire()
                     self.pkt_types.update({seq_no: "data"})
                     self.recv_pkts.update({seq_no: data})
                     self.mutex.release()
-                    self.send_ack(seq_no + 1)
+                    self.send_ack(seq_no + 1) # Send an ACK for what we recieved
                 elif msg_type == "end":
                     self.logger.debug('[PKT]: End Packet' + str(seq_no))
                     self.mutex.acquire()
                     self.pkt_types.update({seq_no: "end"})
                     self.recv_pkts.update({seq_no: data})
                     self.mutex.release()
-                    current_msg = self.get_msg_from_seqs(seq_no)
-                    if current_msg == "":
+                    current_msg = self.get_msg_from_seqs(seq_no) # Try and reconstruct our message
+                    if current_msg == "": # If here, that means we didn't get a complete message, some packets are missing
                         continue
                     self.logger.debug('[PKT]: Concatenated MSG together')
-                    self.send_ack(seq_no + 1)
+                    self.send_ack(seq_no + 1) # Send an ACK for what we recieved
                     self.mutex.acquire()
                     self.queue.put(
-                        (str(current_msg), client_address))
+                        (str(current_msg), client_address)) # Otherwise, put the compelte message into queue
                     self.mutex.release()
                     self.logger.debug(
                         "[PKT]: Completed message, " + str(current_msg))
                 elif msg_type == "ack":
                     self.logger.debug('[PKT]: Received ACK' + str(seq_no))
                     self.mutex.acquire()
-                    self.recv_acks.add(seq_no)
+                    self.recv_acks.add(seq_no) # Want to track the ACKS that we have sent
                     self.mutex.release()
 
     def get_msg_from_seqs(self, seq_no):
         '''
         From the sequence number of the ACK, reconstruct the data 
         '''
-        current_msg = ""
-        curr_seq = seq_no
+        current_msg = "" # Reconstructed string from the message
+        curr_seq = seq_no # Out current sequence number
         self.mutex.acquire()
-        while curr_seq in self.pkt_types.keys():
+        # Will go until missing packet or START packet
+        while curr_seq in self.pkt_types.keys(): # Starting FROM END packet SEQ_NO combine the data section
             self.logger.debug('[MSG_FROM_SEQS]: Looking for' + str(curr_seq))
             current_msg = self.recv_pkts[curr_seq] + current_msg
-            if self.pkt_types[curr_seq] == "start":
+            if self.pkt_types[curr_seq] == "start": # Break if we are at the start packet
                 break
             curr_seq -= 1
+        # If we don't land on the START packet, we are missing some packets
         if curr_seq not in self.pkt_types or self.pkt_types[curr_seq] != "start":
             self.logger.debug('[MSG_FROM_SEQS]: Hmm... missing packets')
             self.mutex.release()
             return ""
+        # If we have already put the same packet in the queueu, don't do it again
         if curr_seq in self.completed_pkts:
             self.logger.debug(
                 '[MSG_FROM_SEQS]: Already have processed this completed packet, will not send upward')
             self.mutex.release()
             return ""
+        # Keep track of our competed packets
         self.completed_pkts.add(curr_seq)
         self.mutex.release()
         return current_msg
@@ -302,12 +314,13 @@ class Client:
         self.send_packet(msg=disconnect_msg)
         self.logger.debug(
             "[SERVER]: Just sent disconnect packet, will it make it")
-        time.sleep(0.5)
+        time.sleep(0.5) # Wait slightly to avoid some timing issues
         print("quitting")
 
     def print_help(self):
         '''
-        This function is just for the sake of our Client module completion
+        Print out help message, taken from below
+        
         '''
         print("Client")
         print("-u username | --user=username The username of Client")
